@@ -6,19 +6,9 @@
 // Code stolen from: https://github.com/mdn/samples-server/blob/master/s/webrtc-from-chat/chatserver.js
 
 "use strict";
-
-import http from 'http';
-import https from 'https';
-import fs from 'fs';
-import colors from 'colors';
 import * as websocket from 'websocket';
 let WebSocketServer = websocket.server;
 
-// Pathnames of the SSL key and certificate files to use for
-// HTTPS connections.
-
-const keyFilePath = `/etc/pki/tls/private/mdn-samples.mozilla.org.key`;
-const certFilePath = `/etc/pki/tls/certs/mdn-samples.mozilla.org.crt`;
 
 // Used for managing the text chat user list.
 
@@ -30,17 +20,6 @@ function log(text) {
   let time = new Date();
 
   console.log(`[` + time.toLocaleTimeString() + `] ` + text);
-}
-
-// Our HTTPS server does nothing but service WebSocket
-// connections, so every request just returns 404. Real Web
-// requests are handled by the main server on the box. If you
-// want to, you can return real HTML here and serve Web content.
-
-function handleWebRequest(request, response) {
-  log (`Received request for ` + request.url);
-  response.writeHead(404);
-  response.end();
 }
 
 
@@ -131,208 +110,157 @@ function sendUserListToAll() {
   }
 }
 
-
-// Try to load the key and certificate files for SSL so we can
-// do HTTPS (required for non-local WebRTC).
-
-let httpsOptions = {
-  key: null,
-  cert: null
-};
-
-try {
-  httpsOptions.key = fs.readFileSync(keyFilePath);
-  try {
-    httpsOptions.cert = fs.readFileSync(certFilePath);
-  } catch(err) {
-    httpsOptions.key = null;
-    httpsOptions.cert = null;
-  }
-} catch(err) {
-  httpsOptions.key = null;
-  httpsOptions.cert = null;
-}
-
-// If we were able to get the key and certificate files, try to
-// start up an HTTPS server.
-
-let webServer = null;
-
-try {
-  if (httpsOptions.key && httpsOptions.cert) {
-    webServer = https.createServer(httpsOptions, handleWebRequest);
-  }
-} catch(err) {
-  webServer = null;
-}
-
-if (!webServer) {
-  try {
-    webServer = http.createServer({}, handleWebRequest);
-  } catch(err) {
-    webServer = null;
-    log(`Error attempting to create HTTP(s) server: ${err.toString()}`);
-  }
-}
-
-
-// Spin up the HTTPS server on the port assigned to this sample.
-// This will be turned into a WebSocket port very shortly.
-
-webServer.listen(6503, () => {
-  console.log(colors.green(`[CHATSERVER] Chat server started on port 6503!`));
-});
-
 // Create the WebSocket server by converting the HTTPS server into one.
+export function startWebsocketServer(httpServer: any) {
+  let wsServer = new WebSocketServer({
+    httpServer,
+    autoAcceptConnections: false
+  });
 
-let wsServer = new WebSocketServer({
-  httpServer: webServer,
-  autoAcceptConnections: false
-});
-
-if (!wsServer) {
-  log(`ERROR: Unable to create WbeSocket server!`);
-}
-
-// Set up a "connect" message handler on our WebSocket server. This is
-// called whenever a user connects to the server's port using the
-// WebSocket protocol.
-
-wsServer.on(`request`, (request) => {
-  if (!originIsAllowed()) {
-    request.reject();
-    log(`Connection from ` + request.origin + ` rejected.`);
-    return;
+  if (!wsServer) {
+    log(`ERROR: Unable to create WebSocket server!`);
   }
 
-  // Accept the request and get a connection.
+  // Set up a "connect" message handler on our WebSocket server. This is
+  // called whenever a user connects to the server's port using the
+  // WebSocket protocol.
 
-  let connection = request.accept(`json`, request.origin);
+  wsServer.on(`request`, (request) => {
+    if (!originIsAllowed()) {
+      request.reject();
+      log(`Connection from ` + request.origin + ` rejected.`);
+      return;
+    }
 
-  // Add the new connection to our list of connections.
+    // Accept the request and get a connection.
 
-  log(`Connection accepted from ` + connection.remoteAddress + `.`);
-  connectionArray.push(connection);
+    let connection = request.accept(`json`, request.origin);
 
-  connection.clientID = nextID;
-  nextID++;
+    // Add the new connection to our list of connections.
 
-  // Send the new client its token; it send back a "username" message to
-  // tell us what username they want to use.
+    log(`Connection accepted from ` + connection.remoteAddress + `.`);
+    connectionArray.push(connection);
 
-  let msg = {
-    type: `id`,
-    id: connection.clientID
-  };
+    connection.clientID = nextID;
+    nextID++;
 
-  connection.sendUTF(JSON.stringify(msg));
+    // Send the new client its token; it send back a "username" message to
+    // tell us what username they want to use.
 
-  // Set up a handler for the "message" event received over WebSocket. This
-  // is a message sent by a client, and may be text to share with other
-  // users, a private message (text or signaling) for one user, or a command
-  // to the server.
+    let msg = {
+      type: `id`,
+      id: connection.clientID
+    };
 
-  connection.on(`message`, (message) => {
-    if (message.type === `utf8`) {
-      log(`Received Message: ` + message.utf8Data);
+    connection.sendUTF(JSON.stringify(msg));
 
-      // Process incoming data.
+    // Set up a handler for the "message" event received over WebSocket. This
+    // is a message sent by a client, and may be text to share with other
+    // users, a private message (text or signaling) for one user, or a command
+    // to the server.
 
-      let sendToClients = true;
-      msg = JSON.parse(message.utf8Data);
-      let connect = getConnectionForID(msg.id);
+    connection.on(`message`, (message) => {
+      if (message.type === `utf8`) {
+        log(`Received Message: ` + message.utf8Data);
 
-      // Take a look at the incoming object and act on it based
-      // on its type. Unknown message types are passed through,
-      // since they may be used to implement client-side features.
-      // Messages with a "target" property are sent only to a user
-      // by that name.
+        // Process incoming data.
 
-      switch(msg.type) {
-        // Public, textual message
-        case `message`:
-          (<any> msg).name = connect.username;
-          (<any> msg).text = (<any> msg).text.replace(/(<([^>]+)>)/ig, ``);
-          break;
+        let sendToClients = true;
+        msg = JSON.parse(message.utf8Data);
+        let connect = getConnectionForID(msg.id);
 
-        // Username change
-        case `username`:
-          let nameChanged = false;
-          let origName = (<any> msg).name;
+        // Take a look at the incoming object and act on it based
+        // on its type. Unknown message types are passed through,
+        // since they may be used to implement client-side features.
+        // Messages with a "target" property are sent only to a user
+        // by that name.
 
-          // Ensure the name is unique by appending a number to it
-          // if it's not; keep trying that until it works.
-          while (!isUsernameUnique((<any> msg).name)) {
-            (<any> msg).name = origName + appendToMakeUnique;
-            appendToMakeUnique++;
-            nameChanged = true;
-          }
+        switch(msg.type) {
+          // Public, textual message
+          case `message`:
+            (<any> msg).name = connect.username;
+            (<any> msg).text = (<any> msg).text.replace(/(<([^>]+)>)/ig, ``);
+            break;
 
-          // If the name had to be changed, we send a "rejectusername"
-          // message back to the user so they know their name has been
-          // altered by the server.
-          if (nameChanged) {
-            let changeMsg = {
-              id: msg.id,
-              type: `rejectusername`,
-              name: (<any> msg).name
-            };
-            connect.sendUTF(JSON.stringify(changeMsg));
-          }
+          // Username change
+          case `username`:
+            let nameChanged = false;
+            let origName = (<any> msg).name;
 
-          // Set this connection's final username and send out the
-          // updated user list to all users. Yeah, we're sending a full
-          // list instead of just updating. It's horribly inefficient
-          // but this is a demo. Don't do this in a real app.
-          connect.username = (<any> msg).name;
-          sendUserListToAll();
-          sendToClients = false;  // We already sent the proper responses
-          break;
-      }
+            // Ensure the name is unique by appending a number to it
+            // if it's not; keep trying that until it works.
+            while (!isUsernameUnique((<any> msg).name)) {
+              (<any> msg).name = origName + appendToMakeUnique;
+              appendToMakeUnique++;
+              nameChanged = true;
+            }
 
-      // Convert the revised message back to JSON and send it out
-      // to the specified client or all clients, as appropriate. We
-      // pass through any messages not specifically handled
-      // in the select block above. This allows the clients to
-      // exchange signaling and other control objects unimpeded.
+            // If the name had to be changed, we send a "rejectusername"
+            // message back to the user so they know their name has been
+            // altered by the server.
+            if (nameChanged) {
+              let changeMsg = {
+                id: msg.id,
+                type: `rejectusername`,
+                name: (<any> msg).name
+              };
+              connect.sendUTF(JSON.stringify(changeMsg));
+            }
 
-      if (sendToClients) {
-        let msgString = JSON.stringify(msg);
-        let i;
+            // Set this connection's final username and send out the
+            // updated user list to all users. Yeah, we're sending a full
+            // list instead of just updating. It's horribly inefficient
+            // but this is a demo. Don't do this in a real app.
+            connect.username = (<any> msg).name;
+            sendUserListToAll();
+            sendToClients = false;  // We already sent the proper responses
+            break;
+        }
 
-        // If the message specifies a target username, only send the
-        // message to them. Otherwise, send it to every user.
-        if ((<any> msg).target && (<any> msg).target !== undefined && (<any> msg).target.length !== 0) {
-          sendToOneUser((<any> msg).target, msgString);
-        } else {
-          for (i=0; i<connectionArray.length; i++) {
-            connectionArray[i].sendUTF(msgString);
+        // Convert the revised message back to JSON and send it out
+        // to the specified client or all clients, as appropriate. We
+        // pass through any messages not specifically handled
+        // in the select block above. This allows the clients to
+        // exchange signaling and other control objects unimpeded.
+
+        if (sendToClients) {
+          let msgString = JSON.stringify(msg);
+          let i;
+
+          // If the message specifies a target username, only send the
+          // message to them. Otherwise, send it to every user.
+          if ((<any> msg).target && (<any> msg).target !== undefined && (<any> msg).target.length !== 0) {
+            sendToOneUser((<any> msg).target, msgString);
+          } else {
+            for (i=0; i<connectionArray.length; i++) {
+              connectionArray[i].sendUTF(msgString);
+            }
           }
         }
       }
-    }
-  });
-
-  // Handle the WebSocket "close" event; this means a user has logged off
-  // or has been disconnected.
-  connection.on(`close`, (reason, description) => {
-    // First, remove the connection from the list of connections.
-    connectionArray = connectionArray.filter((el) => {
-      return el.connected;
     });
 
-    // Now send the updated user list. Again, please don't do this in a
-    // real application. Your users won't like you very much.
-    sendUserListToAll();
+    // Handle the WebSocket "close" event; this means a user has logged off
+    // or has been disconnected.
+    connection.on(`close`, (reason, description) => {
+      // First, remove the connection from the list of connections.
+      connectionArray = connectionArray.filter((el) => {
+        return el.connected;
+      });
 
-    // Build and output log output for close information.
+      // Now send the updated user list. Again, please don't do this in a
+      // real application. Your users won't like you very much.
+      sendUserListToAll();
 
-    let logMessage = `Connection closed: ` + connection.remoteAddress + ` (` +
-                     reason;
-    if (description !== null && description.length !== 0) {
-      logMessage += `: ` + description;
-    }
-    logMessage += `)`;
-    log(logMessage);
+      // Build and output log output for close information.
+
+      let logMessage = `Connection closed: ` + connection.remoteAddress + ` (` +
+                      reason;
+      if (description !== null && description.length !== 0) {
+        logMessage += `: ` + description;
+      }
+      logMessage += `)`;
+      log(logMessage);
+    });
   });
-});
+}

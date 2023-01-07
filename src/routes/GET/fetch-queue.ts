@@ -13,7 +13,9 @@ import { Attribute, UserModel, ModelToObj } from '../../models/User.model';
 
 function calculateSimilarity(UserAttributes: Attribute[] | null, AdvisorAttributes: Attribute[] | null): number {
     if (!UserAttributes ||! AdvisorAttributes) return 0;
-    let similarityScore = UserAttributes.filter(obj => AdvisorAttributes.includes(obj)).length;
+    let UserStrings = UserAttributes.map(obj => `${obj.category}-${obj.name}`);
+    let AdvisorStrings = AdvisorAttributes.map(obj => `${obj.category}-${obj.name}`);
+    let similarityScore = UserStrings.filter(obj => AdvisorStrings.includes(obj)).length;
     return similarityScore;
 }
 

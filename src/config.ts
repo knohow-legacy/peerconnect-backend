@@ -1,4 +1,4 @@
 export let config = {
-    "devMode": true,
+    "devMode": false,
     "no-cors": true
 };

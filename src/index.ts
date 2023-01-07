@@ -13,6 +13,7 @@ import { RouteHandler } from './RouteHandler';
 import { UserModel } from './models/User.model';
 import { PurgeUsers } from './modules/UserPurger';
 import {TheUserQueue} from './modules/UserQueue';
+import { startWebsocketServer } from './modules/ChatServer';
 
 // Run DotENV
 dotenv.config({path: `secret.env`});
@@ -29,7 +30,7 @@ mongoose.set(`strictQuery`, true);
 
 
 console.log(colors.yellow(`[CHATSERVER] Starting chat server...`));
-require(`./modules/ChatServer`);
+startWebsocketServer(server);
 
 // Setup rate limit for the API
 const limiter = rateLimit({
