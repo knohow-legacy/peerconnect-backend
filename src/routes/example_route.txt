@@ -1,0 +1,20 @@
+import express from 'express';
+
+/*
+    What the API is expecting:
+    req.body = {
+    }
+
+    What the API will return
+    {
+    }
+*/
+
+export async function run(req: express.Request, res: express.Response): Promise<express.Response> {
+    if(!req.body){
+        return res.send(`ERROR: Something went wrong!`);
+    }
+}
+
+// Number of params
+export let params = 0;
